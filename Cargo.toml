@@ -1,0 +1,8 @@
+[package]
+name = "nu_plugin_vdf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nu-plugin = "0.105.1"
+nu-protocol = "0.105.1"
