@@ -24,22 +24,25 @@ impl VdfValue {
 
 pub fn parse(input: &str, lossy: bool) -> Result<VdfValue, String> {
     let mut chars = input.chars().peekable();
-    let mut table = BTreeMap::new();
+    skip_whitespace(&mut chars); // Skip leading whitespace
 
-    while let Some(key) = parse_string(&mut chars, lossy)? {
+    // VDF root is typically a single key-value pair, where the value can be a table.
+    if let Some(key) = parse_string(&mut chars, lossy)? {
         if let Some(value) = parse_value(&mut chars, lossy)? {
+            let mut table = BTreeMap::new();
             table.insert(key, value);
+            Ok(VdfValue::Table(table))
         } else {
-            return Err("Unexpected end of input: missing value".to_string());
+            Err("Unexpected end of input: missing value for root key".to_string())
         }
+    } else {
+        Err("Unexpected end of input: missing root key".to_string())
     }
-
-    Ok(VdfValue::Table(table))
 }
 
 fn parse_string<I>(chars: &mut std::iter::Peekable<I>, lossy: bool) -> Result<Option<String>, String>
 where
-    I: Iterator<Item = char>,
+    I: Iterator<Item = char> + Clone,
 {
     skip_whitespace(chars);
     if chars.peek() != Some(&'"') {
@@ -76,7 +79,7 @@ where
 
 fn parse_value<I>(chars: &mut std::iter::Peekable<I>, lossy: bool) -> Result<Option<VdfValue>, String>
 where
-    I: Iterator<Item = char>,
+    I: Iterator<Item = char> + Clone,
 {
     skip_whitespace(chars);
     match chars.peek() {
@@ -96,7 +99,11 @@ where
                         return Err("Unexpected end of input: missing value".to_string());
                     }
                 } else {
-                    break; // No more keys
+                    // If no key is found, it might be an empty table or malformed.
+                    // If it's not '}', then it's an error.
+                    if chars.peek() != Some(&'}') {
+                        return Err("Unexpected token in table: expected key or '}'".to_string());
+                    }
                 }
             }
             Ok(Some(VdfValue::Table(table)))
@@ -110,13 +117,40 @@ where
 
 fn skip_whitespace<I>(chars: &mut std::iter::Peekable<I>)
 where
-    I: Iterator<Item = char>,
+    I: Iterator<Item = char> + Clone,
 {
-    while let Some(&c) = chars.peek() {
-        if c.is_whitespace() {
-            chars.next();
-        } else {
-            break;
+    loop {
+        let mut skipped_something = false;
+
+        // Skip actual whitespace
+        while let Some(&c) = chars.peek() {
+            if c.is_whitespace() {
+                chars.next();
+                skipped_something = true;
+            } else {
+                break;
+            }
+        }
+
+        // Skip single-line comments (//)
+        if let Some('/') = chars.peek() {
+            let mut temp_chars = chars.clone(); // Peekableをクローンして先読み
+            temp_chars.next(); // 最初の '/' を消費
+            if let Some('/') = temp_chars.peek() {
+                chars.next(); // 最初の '/' を消費
+                chars.next(); // 2番目の '/' を消費
+                while let Some(&c) = chars.peek() {
+                    if c == '\n' || c == '\r' { // \n と \r をエスケープ
+                        break; // End of line
+                    }
+                    chars.next();
+                }
+                skipped_something = true;
+            }
+        }
+
+        if !skipped_something {
+            break; // No more whitespace or comments to skip
         }
     }
 }
